@@ -68,11 +68,11 @@ One-time setup:
    arduino-cli core update-index
    arduino-cli core install esp32-bluepad32:esp32
    ```
-3. Confirm the exact FQBN for your board (`esp32-bluepad32:esp32:esp32dev` is confirmed correct against a real arduino-cli install — note the package name is hyphenated, not underscored, despite the index file itself being named with an underscore):
+3. Confirm the exact FQBN for your board (`esp32-bluepad32:esp32:esp32` — "ESP32 Dev Module" — is confirmed correct against a real arduino-cli install for a generic ESP-WROOM-32 board; note this package names its generic board `esp32`, not `esp32dev` like the official esp32:esp32 core does, and the overall package name is hyphenated despite the index file itself being named with an underscore):
    ```
-   arduino-cli core search bluepad
+   arduino-cli board listall | grep -i bluepad
    ```
-   If your board isn't `esp32dev`, swap that last segment and pass the real FQBN as `flash.sh`'s second argument.
+   Find your specific board in that list (DOIT ESP32 DEVKIT V1, WEMOS LOLIN32, etc. all have their own entries) and pass its exact FQBN as `flash.sh`'s second argument if it differs from the generic default.
 4. Linux only, so you don't need `sudo` to flash: `sudo usermod -a -G dialout $USER`, then log out and back in.
 
 Prefer the Arduino IDE GUI instead? Same board-manager URLs go in
