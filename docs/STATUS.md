@@ -40,9 +40,9 @@ gcc syntax checks, before trusting that something builds for real.
 
 | Component | Status | Notes |
 |---|---|---|
-| Bluepad32 integration | 🟢 Should work as-is | Bluepad32 is a mature, actively maintained library. `main.cpp` follows its documented callback pattern. |
+| Bluepad32 integration | 🟢 Should work as-is | Bluepad32 is a mature, actively maintained library. `board-a-controller.ino` follows its documented callback pattern. |
 | UART output struct | 🟢 Straightforward | Simple fixed-size struct over UART, nothing exotic. |
-| Build config | 🟡 Needs your board specifics | You must supply your own `platformio.ini` board target / Bluepad32 install per their docs — see README. |
+| Build config | 🟡 One-time toolchain setup needed | `board-a-controller/flash.sh` handles compile+upload+monitor as one command once arduino-cli and the "ESP32 + Bluepad32" board package are installed — see `docs/HARDWARE_SETUP.md`. |
 
 Board A is the low-risk half. Get this working and tested against literally
 anything (even just printing to Serial) before touching Board B.
