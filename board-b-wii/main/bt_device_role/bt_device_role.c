@@ -76,7 +76,7 @@ static void send_hci_cmd(uint16_t opcode, const void *params, uint8_t param_len)
     pkt[2] = (opcode >> 8) & 0xff;
     pkt[3] = param_len;
     if (param_len) memcpy(&pkt[4], params, param_len);
-    vhci_send(pkt, 4 + param_len);
+    bt_vhci_transport_send(pkt, 4 + param_len);
 }
 
 static void cmd_reset(void) {
