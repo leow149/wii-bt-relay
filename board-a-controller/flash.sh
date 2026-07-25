@@ -5,11 +5,13 @@
 #   ./flash.sh [PORT] [FQBN]
 #
 # PORT defaults to /dev/ttyUSB0.
-# FQBN defaults to esp32-bluepad32:esp32:esp32dev (confirmed against a real
-# arduino-cli run -- the package uses a HYPHEN, not the underscore this
-# script originally guessed. If arduino-cli still errors saying it doesn't
-# recognize the FQBN, run `arduino-cli core search bluepad` and pass the
-# exact ID it prints as this script's second argument.
+# FQBN defaults to esp32-bluepad32:esp32:esp32 ("ESP32 Dev Module" in this
+# package's own board list -- confirmed against a real arduino-cli run.
+# Note this package's generic board is named "esp32", not "esp32dev" like
+# the official esp32:esp32 core uses. If your board is something more
+# specific (DOIT ESP32 DEVKIT V1, WEMOS LOLIN32, etc.), run:
+#     arduino-cli board listall | grep -i bluepad
+# and pass the exact FQBN for your board as this script's second argument.
 #
 # One-time setup (see docs/HARDWARE_SETUP.md for the full walkthrough):
 #   arduino-cli config init
@@ -22,7 +24,7 @@
 set -euo pipefail
 
 PORT="${1:-/dev/ttyUSB0}"
-FQBN="${2:-esp32-bluepad32:esp32:esp32dev}"
+FQBN="${2:-esp32-bluepad32:esp32:esp32}"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if ! command -v arduino-cli &> /dev/null; then
