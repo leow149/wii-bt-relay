@@ -64,9 +64,9 @@ void bt_l2cap_device_role_init(uint16_t acl_handle) {
 /* -- Low-level ACL/L2CAP signaling packet send -----------------------------
  * Mirrors the byte layout BlueRetro's bt_l2cap_cmd() builds (H4 ACL header +
  * ACL header + L2CAP header + signaling header + payload), but written
- * standalone against our own vhci_send() rather than BlueRetro's internal
- * TX queue, since we're a single peripheral link rather than a multi-device
- * host. */
+ * standalone against our own bt_vhci_transport_send() rather than
+ * BlueRetro's internal TX queue, since we're a single peripheral link
+ * rather than a multi-device host. */
 static void send_l2cap_sig(uint8_t code, uint8_t ident, const void *params, uint16_t param_len) {
     uint8_t pkt[4 + 4 + 4 + 64]; /* H4(1) + acl_hdr(4) + l2cap_hdr(4) + sig_hdr(4) + payload */
     uint16_t l2cap_payload_len = sizeof(struct bt_l2cap_sig_hdr) + param_len;
@@ -95,7 +95,7 @@ static void send_l2cap_sig(uint8_t code, uint8_t ident, const void *params, uint
     body = &pkt[1 + sizeof(*acl_hdr) + sizeof(*l2cap_hdr) + sizeof(*sig_hdr)];
     if (param_len) memcpy(body, params, param_len);
 
-    vhci_send(pkt, 1 + sizeof(*acl_hdr) + sizeof(*l2cap_hdr) + sizeof(*sig_hdr) + param_len);
+    bt_vhci_transport_send(pkt, 1 + sizeof(*acl_hdr) + sizeof(*l2cap_hdr) + sizeof(*sig_hdr) + param_len);
 }
 
 static void send_conn_rsp(uint8_t ident, l2cap_chan_state_t *chan) {
@@ -265,7 +265,7 @@ static void bt_l2cap_send_data_on_cid(uint16_t remote_cid, const uint8_t *data, 
     l2cap_hdr->cid = remote_cid;
 
     memcpy(&pkt[1 + sizeof(*acl_hdr) + sizeof(*l2cap_hdr)], data, len);
-    vhci_send(pkt, 1 + sizeof(*acl_hdr) + sizeof(*l2cap_hdr) + len);
+    bt_vhci_transport_send(pkt, 1 + sizeof(*acl_hdr) + sizeof(*l2cap_hdr) + len);
 }
 
 bool bt_l2cap_device_role_on_channel_data(uint16_t cid, const uint8_t *data, uint16_t len) {
