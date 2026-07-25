@@ -30,8 +30,10 @@ roles on a single ESP32 have shown real instability in community reports.
 ## Repo layout
 
 ```
-board-a-controller/     Arduino/PlatformIO firmware, built on Bluepad32
+board-a-controller/     Real Arduino sketch (arduino-cli), built on Bluepad32
+  flash.sh               One-command compile + upload + monitor
 board-b-wii/            ESP-IDF firmware for the Wii-facing device role
+  flash.sh               One-command build + flash + monitor
   main/bt_reference/    Vendored, UNMODIFIED BlueRetro host-role BT stack
                          (Apache-2.0, see NOTICE) — read for reference, not
                          built directly into the device-role firmware
@@ -39,6 +41,7 @@ board-b-wii/            ESP-IDF firmware for the Wii-facing device role
   main/wiimote/         Wiimote report format, crypto, and calibration data
 docs/                   Architecture notes, protocol notes, status tracker
 tools/                  Notes on capturing a reference Bluetooth trace
+Makefile                `make board-a` / `make board-b` from the repo root
 ```
 
 ## Prerequisites
@@ -50,13 +53,17 @@ and toolchain install steps. Short version:
 - A real Bluetooth controller to pair to Board A
 - A Bluetooth HCI sniffer setup (a PC with `btmon`/Wireshark) — you'll need
   this constantly while bringing up Board B; see `tools/CAPTURE_NOTES.md`
-- ESP-IDF toolchain for Board B; Arduino-ESP32 + PlatformIO (or Arduino IDE)
-  for Board A, plus the Bluepad32 library
+- ESP-IDF toolchain for Board B; arduino-cli (or Arduino IDE) + the
+  "ESP32 + Bluepad32" board package for Board A — see HARDWARE_SETUP.md,
+  Bluepad32 is not a normal library
 
 ## Build order
 
 See `docs/STATUS.md` → "What to actually do first." Do not skip ahead to
-wiring both boards together — bring Board B up alone against a real Wii first.
+wiring both boards together — bring Board B up alone against a real Wii
+first. Once each board's one-time toolchain setup is done (HARDWARE_SETUP.md),
+day-to-day iteration is just `./board-a-controller/flash.sh <port>` and
+`./board-b-wii/flash.sh <port>` (or `make board-a` / `make board-b`).
 
 ## License
 
