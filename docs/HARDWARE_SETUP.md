@@ -35,16 +35,41 @@ shared power rail needed for the UART link itself.
 
 ## Software / toolchain
 
-**Board A (`board-a-controller/`) — Arduino-style:**
-1. Install the Arduino IDE (or PlatformIO, if you prefer — a `platformio.ini` is already in that folder).
-2. Add the ESP32 board package via Arduino's Boards Manager.
-3. Install the **Bluepad32** library (via Library Manager, or see https://bluepad32.readthedocs.io for the manual install path — Bluepad32 needs a bit more setup than a typical Arduino library, since it replaces part of the Bluetooth stack).
-4. Open `board-a-controller/src/main.cpp`, select your board, flash.
+**Board A (`board-a-controller/`) — Arduino IDE (not the plain PlatformIO
+`lib_deps` route the checked-in `platformio.ini` implies):**
 
-**Board B (`board-b-wii/`) — ESP-IDF:**
-1. Install ESP-IDF per Espressif's official get-started guide (this is a real embedded toolchain install, not a quick library add — budget some time for it if you haven't done it before).
-2. From `board-b-wii/`, the usual ESP-IDF flow applies: `idf.py set-target esp32`, `idf.py build`, `idf.py -p <port> flash monitor`.
-3. Watch the serial monitor — `docs/STATUS.md`'s checkpoint 2 tells you what a successful bring-up should print.
+Bluepad32 is **not a normal Arduino library**. It replaces part of the ESP32
+Bluetooth stack, so it needs to be installed as a special combined board
+package, not fetched as a dependency. The correct steps:
+
+1. Install the Arduino IDE (2.x).
+2. File → Preferences → "Additional boards manager URLs", add both of these (comma-separated):
+   - `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
+   - `https://raw.githubusercontent.com/ricardoquesada/esp32-arduino-lib-builder/master/bluepad32_files/package_esp32_bluepad32_index.json`
+3. Tools → Board → Boards Manager: install the official **esp32** package, then search **bluepad32** and install the **"ESP32 + Bluepad32"** package.
+4. Tools → Board → **ESP32 + Bluepad32 Arduino** → pick your specific dev board (if unsure, "DOIT ESP32 DEVKIT V1" is the common default for a generic ESP-WROOM-32 board).
+5. Create a new sketch, paste in `board-a-controller/src/main.cpp`'s content, and copy `shared_protocol.h` into the same sketch folder (Arduino sketches don't read from arbitrary include paths the way the checked-in `platformio.ini` assumed).
+6. Linux only: add yourself to the serial port group so you don't need `sudo` to flash: `sudo usermod -a -G dialout $USER`, then log out and back in.
+7. Plug in Board A, select Tools → Port (usually `/dev/ttyUSB0`), click Upload.
+
+The existing `board-a-controller/platformio.ini` in this repo reflects the
+original (incorrect) plain-library assumption — treat the Arduino IDE route
+above as authoritative until that's fixed to use Bluepad32's actual
+ESP-IDF+PlatformIO template (`esp-idf-arduino-bluepad32-template`), which is
+a materially different, more involved setup than a one-line `lib_deps` entry.
+
+**Board B (`board-b-wii/`) — ESP-IDF, Linux:**
+
+1. Install prerequisites: `sudo apt install git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0`
+2. Clone the **v5.5 branch** (not v6.0 — v6.0 removed some legacy drivers, and this project's low-level VHCI/Bluedroid-style Classic Bluetooth calls haven't been checked against that branch):
+   ```
+   mkdir -p ~/esp && cd ~/esp
+   git clone -b release/v5.5 --recursive https://github.com/espressif/esp-idf.git
+   ```
+3. Install the toolchain: `cd ~/esp/esp-idf && ./install.sh esp32`
+4. In every new terminal you use for this project: `. ~/esp/esp-idf/export.sh`
+5. From `board-b-wii/`: `idf.py set-target esp32` then `idf.py build`
+6. Plug in Board B, find its port (`ls /dev/ttyUSB*` or `ls /dev/ttyACM*`), then: `idf.py -p /dev/ttyUSB0 flash monitor` (Ctrl+] to exit the monitor)
 
 ## Bring-up order (short version — see STATUS.md for the full version)
 
