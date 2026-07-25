@@ -23,9 +23,9 @@
 #include "bt_vhci_transport.h"
 
 /* atomic-ish flag; single producer (VHCI callback) / single consumer
- * (vhci_send busy-wait) so a plain volatile is adequate here. BlueRetro uses
- * a proper atomic bit + ring buffer since it juggles multiple simultaneous
- * links; revisit if this stack grows the same requirement. */
+ * (bt_vhci_transport_send busy-wait) so a plain volatile is adequate here.
+ * BlueRetro uses a proper atomic bit + ring buffer since it juggles multiple
+ * simultaneous links; revisit if this stack grows the same requirement. */
 static volatile int g_ctrl_ready = 0;
 
 static bt_vhci_rx_cb_t g_rx_cb = NULL;
@@ -75,7 +75,11 @@ esp_err_t bt_vhci_transport_init(bt_vhci_rx_cb_t rx_cb) {
     return ESP_OK;
 }
 
-void vhci_send(const uint8_t *hci_cmd, uint16_t len) {
+/* NAMED bt_vhci_transport_send, not vhci_send -- see bt_vhci_transport.h for
+ * why: ESP-IDF's own precompiled Bluetooth controller blob already defines a
+ * global symbol called exactly "vhci_send", which the linker won't allow a
+ * second definition of. Caught by an actual link failure, not guessed. */
+void bt_vhci_transport_send(const uint8_t *hci_cmd, uint16_t len) {
     /* Busy-wait for controller ready. Fine for a single low-traffic
      * peripheral link; see file header note if this needs to become
      * queue-based later. */
@@ -83,7 +87,7 @@ void vhci_send(const uint8_t *hci_cmd, uint16_t len) {
     while (!g_ctrl_ready) {
         spins++;
         if (spins > 1000000) {
-            printf("# bt_vhci_transport: vhci_send timed out waiting for ready\n");
+            printf("# bt_vhci_transport: bt_vhci_transport_send timed out waiting for ready\n");
             return;
         }
     }
