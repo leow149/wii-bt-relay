@@ -26,3 +26,12 @@ idf_component_register(
     REQUIRES
         bt
 )
+
+# CRITICAL: zephyr_hci_defs.h / zephyr_l2cap_defs.h / zephyr_types.h (vendored
+# from BlueRetro's tree in bt_reference/) branch their entire content on
+# whether BLUERETRO is defined -- without it, they #include real Zephyr/net_buf
+# headers that don't exist in this project and the build fails immediately.
+# All local ad-hoc compile checks during development used "-DBLUERETRO" by
+# hand and this got missed in the actual CMake config until an audit caught
+# it -- see docs/STATUS.md.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE BLUERETRO)
