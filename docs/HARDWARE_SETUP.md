@@ -35,31 +35,65 @@ shared power rail needed for the UART link itself.
 
 ## Software / toolchain
 
-**Board A (`board-a-controller/`) — Arduino IDE (not the plain PlatformIO
-`lib_deps` route the checked-in `platformio.ini` implies):**
+**Board A (`board-a-controller/`) — arduino-cli, one command per flash:**
 
 Bluepad32 is **not a normal Arduino library**. It replaces part of the ESP32
-Bluetooth stack, so it needs to be installed as a special combined board
-package, not fetched as a dependency. The correct steps:
+Bluetooth stack, so it's installed as a special combined board package, not
+fetched as a dependency — that's why this isn't a plain PlatformIO `lib_deps`
+setup (an earlier version of this doc assumed it was; that's now fixed).
 
-1. Install the Arduino IDE (2.x).
-2. File → Preferences → "Additional boards manager URLs", add both of these (comma-separated):
-   - `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-   - `https://raw.githubusercontent.com/ricardoquesada/esp32-arduino-lib-builder/master/bluepad32_files/package_esp32_bluepad32_index.json`
-3. Tools → Board → Boards Manager: install the official **esp32** package, then search **bluepad32** and install the **"ESP32 + Bluepad32"** package.
-4. Tools → Board → **ESP32 + Bluepad32 Arduino** → pick your specific dev board (if unsure, "DOIT ESP32 DEVKIT V1" is the common default for a generic ESP-WROOM-32 board).
-5. Create a new sketch, paste in `board-a-controller/src/main.cpp`'s content, and copy `shared_protocol.h` into the same sketch folder (Arduino sketches don't read from arbitrary include paths the way the checked-in `platformio.ini` assumed).
-6. Linux only: add yourself to the serial port group so you don't need `sudo` to flash: `sudo usermod -a -G dialout $USER`, then log out and back in.
-7. Plug in Board A, select Tools → Port (usually `/dev/ttyUSB0`), click Upload.
+`board-a-controller/` is laid out as a real Arduino sketch (the folder name
+matches `board-a-controller.ino`, with `shared_protocol.h` sitting right
+alongside it), so once the toolchain below is installed once, every future
+build+flash is just:
 
-The existing `board-a-controller/platformio.ini` in this repo reflects the
-original (incorrect) plain-library assumption — treat the Arduino IDE route
-above as authoritative until that's fixed to use Bluepad32's actual
-ESP-IDF+PlatformIO template (`esp-idf-arduino-bluepad32-template`), which is
-a materially different, more involved setup than a one-line `lib_deps` entry.
+```
+./board-a-controller/flash.sh /dev/ttyUSB0
+```
 
-**Board B (`board-b-wii/`) — ESP-IDF, Linux:**
+(or `make board-a PORT_A=/dev/ttyUSB0` from the repo root). `flash.sh`
+compiles, uploads, and opens the serial monitor in one shot.
 
+One-time setup:
+1. Install arduino-cli:
+   ```
+   curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+   mv bin/arduino-cli ~/.local/bin/
+   ```
+2. Register the two board-manager URLs and install the combined core:
+   ```
+   arduino-cli config init
+   arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+   arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/ricardoquesada/esp32-arduino-lib-builder/master/bluepad32_files/package_esp32_bluepad32_index.json
+   arduino-cli core update-index
+   arduino-cli core install esp32_bluepad32:esp32
+   ```
+3. Confirm the exact FQBN for your board (the package name above is a best guess — verify it):
+   ```
+   arduino-cli board listall | grep -i bluepad
+   ```
+   If it differs from `esp32_bluepad32:esp32:esp32dev`, pass the real one as `flash.sh`'s second argument.
+4. Linux only, so you don't need `sudo` to flash: `sudo usermod -a -G dialout $USER`, then log out and back in.
+
+Prefer the Arduino IDE GUI instead? Same board-manager URLs go in
+File → Preferences → "Additional boards manager URLs"; install **esp32**
+and **ESP32 + Bluepad32** via Boards Manager; open `board-a-controller.ino`
+directly (it's already a valid sketch) and use Tools → Board / Tools → Port / Upload.
+
+**Board B (`board-b-wii/`) — ESP-IDF, one command per flash:**
+
+Once the toolchain below is installed once, every future build+flash is:
+
+```
+./board-b-wii/flash.sh /dev/ttyUSB0
+```
+
+(or `make board-b PORT_B=/dev/ttyUSB0` from the repo root). `flash.sh` sets
+the target, builds, flashes, and opens the monitor in one shot — and will
+auto-source `export.sh` for you if you pass `IDF_PATH` and haven't sourced
+it yet in that shell (`IDF_PATH=$HOME/esp/esp-idf ./board-b-wii/flash.sh`).
+
+One-time setup:
 1. Install prerequisites: `sudo apt install git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0`
 2. Clone the **v5.5 branch** (not v6.0 — v6.0 removed some legacy drivers, and this project's low-level VHCI/Bluedroid-style Classic Bluetooth calls haven't been checked against that branch):
    ```
@@ -67,9 +101,17 @@ a materially different, more involved setup than a one-line `lib_deps` entry.
    git clone -b release/v5.5 --recursive https://github.com/espressif/esp-idf.git
    ```
 3. Install the toolchain: `cd ~/esp/esp-idf && ./install.sh esp32`
-4. In every new terminal you use for this project: `. ~/esp/esp-idf/export.sh`
-5. From `board-b-wii/`: `idf.py set-target esp32` then `idf.py build`
-6. Plug in Board B, find its port (`ls /dev/ttyUSB*` or `ls /dev/ttyACM*`), then: `idf.py -p /dev/ttyUSB0 flash monitor` (Ctrl+] to exit the monitor)
+4. Either source `. ~/esp/esp-idf/export.sh` once per shell yourself, or just always invoke `flash.sh` with `IDF_PATH=$HOME/esp/esp-idf` set.
+
+## Why there isn't one single command for both boards
+
+Board A (arduino-cli) and Board B (ESP-IDF) are two unrelated toolchains
+with no shared build system, so unifying them into one literal command
+would just be a thin wrapper hiding which tool actually ran — and you
+should be flashing and checking each board independently before wiring
+them together anyway (see STATUS.md's bring-up order). One command *per
+board*, via `flash.sh` or the root `Makefile`, is the practical ceiling
+here.
 
 ## Bring-up order (short version — see STATUS.md for the full version)
 
