@@ -94,7 +94,10 @@ auto-source `export.sh` for you if you pass `IDF_PATH` and haven't sourced
 it yet in that shell (`IDF_PATH=$HOME/esp/esp-idf ./board-b-wii/flash.sh`).
 
 One-time setup:
-1. Install prerequisites: `sudo apt install git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0`
+1. Install prerequisites:
+   - Debian/Ubuntu: `sudo apt install git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0`
+   - Arch/EndeavourOS/Manjaro: `sudo pacman -S --needed gcc git make flex bison gperf python cmake ninja ccache dfu-util libusb python-pip` (per Espressif's own current docs — Arch doesn't split `-dev`/`-venv` packages out separately, they're part of the base `python`/`cmake`/etc. packages)
+   - Other distros: see [Espressif's Linux setup guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/linux-macos-setup-legacy.html) for the exact package names
 2. Clone the **v5.5 branch** (not v6.0 — v6.0 removed some legacy drivers, and this project's low-level VHCI/Bluedroid-style Classic Bluetooth calls haven't been checked against that branch):
    ```
    mkdir -p ~/esp && cd ~/esp
