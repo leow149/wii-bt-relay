@@ -6,6 +6,36 @@ real Wii console — I (the AI that scaffolded this repo) have no way to compile
 against Xtensa toolchains or talk to physical Bluetooth radios. Treat this as a
 structured starting point for hands-on iteration, not a finished product.
 
+## Audit findings (post-push review)
+
+A full audit compared every file actually on GitHub against the local sources
+used to build and verify this project. Two things were found:
+
+1. **Real bug, now fixed**: `board-b-wii/main/CMakeLists.txt` never defined
+   the `BLUERETRO` preprocessor macro that `bt_reference/zephyr_hci_defs.h`,
+   `zephyr_l2cap_defs.h`, and `zephyr_types.h` branch their entire content on.
+   Every local compile check during development added `-DBLUERETRO` by hand
+   as a gcc flag, which masked the fact that the real CMake build never set
+   it — `idf.py build` would have failed immediately on a real ESP-IDF
+   toolchain. Fixed by adding `target_compile_definitions(${COMPONENT_LIB}
+   PRIVATE BLUERETRO)` to the component CMakeLists. This specific line
+   (`target_compile_definitions` after `idf_component_register`) is the
+   standard documented ESP-IDF idiom but, like everything else touching the
+   real toolchain, hasn't been run through `idf.py build` on real hardware —
+   verify it works on your installed IDF version.
+2. **Two purely cosmetic whitespace differences**, found and root-caused, no
+   fix needed: `bt_reference/host.h` is missing one trailing blank line at
+   EOF (byte-for-byte harmless), and `bt_reference/zephyr_l2cap_defs.h` has
+   one fewer tab of indentation on two lines *inside an `#ifndef BLUERETRO`
+   block that never compiles for this project's build* (since BLUERETRO is
+   always defined here) — not just harmless but unreachable.
+
+The takeaway: manual, ad-hoc `-DBLUERETRO`-flagged gcc compiles throughout
+development were good enough to catch real logic/struct-layout bugs, but they
+silently papered over one real build-configuration gap. If you make further
+changes, double check the actual CMakeLists / build system, not just standalone
+gcc syntax checks, before trusting that something builds for real.
+
 ## Board A — controller-facing
 
 | Component | Status | Notes |
