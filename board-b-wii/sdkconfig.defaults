@@ -35,3 +35,19 @@ CONFIG_BTDM_CTRL_BR_EDR_MAX_SYNC_CONN_EFF=0
 CONFIG_BTDM_CTRL_PINNED_TO_CORE_0=y
 CONFIG_BTDM_CTRL_PINNED_TO_CORE=0
 CONFIG_BTDM_CTRL_HCI_MODE_VHCI=y
+
+# A real hardware test triggered repeated task_wdt timeouts on IDLE0/IDLE1
+# right after the controller enabled. This is a known characteristic of the
+# ESP32 Classic BT controller's own internal radio-handling tasks (which run
+# with no host stack layered on top here, same as BlueRetro) -- they're CPU-
+# heavy enough, especially once discoverable/scan state kicks in, to starve
+# the idle tasks past the default Task Watchdog timeout even though our own
+# app_main loop is yielding normally every 5ms (confirmed via the watchdog's
+# own backtrace, which showed our task in perfectly ordinary spots: inside
+# uart_read_bytes() and vTaskDelay(), not stuck anywhere). This is Espressif's
+# own documented, recommended fix for that situation -- stop the watchdog
+# from monitoring the idle tasks specifically, rather than raising the
+# timeout or disabling the watchdog system-wide (which would also stop
+# catching a genuine hang in our own code, if one exists).
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
