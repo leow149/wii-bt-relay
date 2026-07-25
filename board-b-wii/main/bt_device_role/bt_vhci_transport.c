@@ -4,11 +4,14 @@
  * Unlike the rest of bt_device_role/, this file's init sequence and callback
  * registration pattern is copied directly from the real, working pattern in
  * ../bt_reference/host.c (BlueRetro's host-role bring-up) — esp_bt_controller_init,
- * esp_bt_controller_enable(ESP_BT_MODE_BTDM), esp_vhci_host_register_callback
- * with a {tx_ready, rx_pkt} callback struct are all real ESP-IDF esp_bt.h API,
+ * esp_bt_controller_enable(), esp_vhci_host_register_callback with a
+ * {tx_ready, rx_pkt} callback struct are all real ESP-IDF esp_bt.h API,
  * confirmed against working code rather than recalled from memory. This part
  * is genuinely low-risk — it's the same bring-up any ESP32 classic-BT project
- * does regardless of host vs device role.
+ * does regardless of host vs device role. One thing that WASN'T low-risk and
+ * had to be fixed after a real hardware test: the enable() mode argument
+ * must be ESP_BT_MODE_CLASSIC_BT, not BlueRetro's ESP_BT_MODE_BTDM, since our
+ * sdkconfig.defaults configures the controller as BR/EDR-only (see below).
  *
  * Simplified vs. BlueRetro's version: no ring buffer / separate TX task, since
  * this stack sends far less traffic (one peripheral link, not N host
@@ -57,7 +60,16 @@ esp_err_t bt_vhci_transport_init(bt_vhci_rx_cb_t rx_cb) {
         return ret;
     }
 
-    ret = esp_bt_controller_enable(ESP_BT_MODE_BTDM);
+    /* ESP_BT_MODE_CLASSIC_BT, not ESP_BT_MODE_BTDM (dual BLE+Classic) --
+     * board-b-wii/sdkconfig.defaults sets CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=y
+     * (we only need Classic to emulate a Wiimote), and Espressif's own docs
+     * are explicit that the mode passed here "must be equal to the mode in
+     * cfg of esp_bt_controller_init()" -- passing BTDM against a
+     * BR/EDR-only-configured controller is exactly what produced a real
+     * ESP_ERR_INVALID_ARG on actual hardware. BlueRetro's host.c (the
+     * pattern this file was originally copied from) needs BTDM because it
+     * supports BLE controllers too; we don't. */
+    ret = esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT);
     if (ret != ESP_OK) {
         printf("# bt_vhci_transport: controller enable failed: %s\n", esp_err_to_name(ret));
         return ret;
