@@ -22,7 +22,7 @@ idf_component_register(
         "bt_reference"
         "bt_device_role"
         "wiimote"
-        "../../board-a-controller/include"
+        "../../board-a-controller"
     REQUIRES
         bt
 )
