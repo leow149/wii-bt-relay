@@ -25,6 +25,8 @@ idf_component_register(
         "../../board-a-controller"
     REQUIRES
         bt
+    PRIV_REQUIRES
+        esp_driver_uart
 )
 
 # CRITICAL: zephyr_hci_defs.h / zephyr_l2cap_defs.h / zephyr_types.h (vendored
