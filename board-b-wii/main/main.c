@@ -40,6 +40,11 @@ void app_main(void) {
     bt_device_role_init();
 
     while (1) {
+        /* bt_vhci_transport_pump_tx() MUST run from here, not from inside
+         * bt_device_role_on_hci_event()'s call chain -- see
+         * bt_vhci_transport.c for the real deadlock a hardware test found
+         * when sends were attempted directly from the rx callback context. */
+        bt_vhci_transport_pump_tx();
         bt_device_role_poll();
         uart_bridge_poll();
         vTaskDelay(pdMS_TO_TICKS(5));
