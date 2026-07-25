@@ -1,0 +1,51 @@
+This project vendors and adapts source files from BlueRetro
+(https://github.com/darthcloud/BlueRetro), Copyright (c) 2019-2024 Jacques Gagnon,
+licensed under the Apache License, Version 2.0.
+
+Vendored, unmodified reference files (in board-b-wii/main/bt_reference/):
+  hci.c, hci.h, l2cap.c, l2cap.h, sdp.c, sdp.h, host.c, host.h, wii.c, wii.h
+
+Additionally vendored, unmodified (in board-b-wii/main/bt_reference/):
+  zephyr_hci_defs.h — hci.h from the Zephyr Project, Copyright (c) 2015-2016
+    Intel Corporation, Apache-2.0, as included in BlueRetro's tree at
+    main/zephyr/hci.h.
+  zephyr_l2cap_defs.h — l2cap_internal.h from the Zephyr Project, same
+    copyright/license, as included in BlueRetro's tree at
+    main/zephyr/l2cap_internal.h.
+Both provide real, standard Bluetooth Core Specification structure/opcode
+definitions and are used directly by bt_device_role.c / bt_l2cap_device_role.c
+rather than reimplemented from memory.
+
+These implement BlueRetro's Bluetooth Classic *host*-role stack (the ESP32 acting
+as a Bluetooth Classic controller connecting outward to gamepads). They are
+included unmodified as reference material: the HCI opcode usage, packet framing,
+and L2CAP/SDP handling patterns are structurally relevant to the new device-role
+(peripheral) code in bt_device_role/, which is original code written for this
+project and is NOT a modification of BlueRetro's files.
+
+BlueRetro itself was archived by its author on 2025-12-14. See its README for
+the author's own notice inviting forks under the license.
+
+All other code in this repository is original, written from public Bluetooth
+Core Specification opcodes and the WiiBrew wiki's Wiimote protocol documentation
+(https://wiibrew.org/wiki/Wiimote), and is licensed under Apache-2.0 as well
+unless stated otherwise in a given file's header.
+
+Additionally: several specific facts used in bt_device_role.c, bt_l2cap_device_role.c,
+and bt_bdaddr_setup.c were identified by reading (not copying) the source of
+rnconrad/WiimoteEmulator (https://github.com/rnconrad/WiimoteEmulator), a
+project independently confirmed by its own users to pair successfully with
+real Wii and vWii consoles. That repository has no LICENSE file, so no code
+from it has been copied into this repository verbatim -- the facts below were
+re-derived and re-implemented from scratch based on understanding *why* that
+project's code does what it does, not by reproducing its expression:
+  - The requirement that the emulated device's Bluetooth address carry a
+    Nintendo OUI (their adapter.c checks/enforces this before anything else)
+  - The specific Class of Device value real Wiimotes advertise (0x002504)
+  - The requirement to explicitly disable Simple Secure Pairing mode, since
+    the Wii only speaks legacy PIN-based pairing
+  - Confirmation that the expected pairing PIN is the peer device's own
+    Bluetooth address (their PIN callback plugin is a four-line function
+    doing exactly this)
+These are properties of the real Wii/Wiimote's behavior -- facts about a
+third-party protocol -- not expressive content belonging to that project.
