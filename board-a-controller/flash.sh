@@ -5,10 +5,11 @@
 #   ./flash.sh [PORT] [FQBN]
 #
 # PORT defaults to /dev/ttyUSB0.
-# FQBN defaults to esp32_bluepad32:esp32:esp32dev. If arduino-cli errors
-# saying it doesn't recognize that FQBN, the package name guessed here
-# didn't match — run `arduino-cli board listall | grep -i bluepad` and
-# pass the exact string it prints as the second argument.
+# FQBN defaults to esp32-bluepad32:esp32:esp32dev (confirmed against a real
+# arduino-cli run -- the package uses a HYPHEN, not the underscore this
+# script originally guessed. If arduino-cli still errors saying it doesn't
+# recognize the FQBN, run `arduino-cli core search bluepad` and pass the
+# exact ID it prints as this script's second argument.
 #
 # One-time setup (see docs/HARDWARE_SETUP.md for the full walkthrough):
 #   arduino-cli config init
@@ -17,11 +18,11 @@
 #   arduino-cli config add board_manager.additional_urls \
 #     https://raw.githubusercontent.com/ricardoquesada/esp32-arduino-lib-builder/master/bluepad32_files/package_esp32_bluepad32_index.json
 #   arduino-cli core update-index
-#   arduino-cli core install esp32_bluepad32:esp32
+#   arduino-cli core install esp32-bluepad32:esp32
 set -euo pipefail
 
 PORT="${1:-/dev/ttyUSB0}"
-FQBN="${2:-esp32_bluepad32:esp32:esp32dev}"
+FQBN="${2:-esp32-bluepad32:esp32:esp32dev}"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if ! command -v arduino-cli &> /dev/null; then
