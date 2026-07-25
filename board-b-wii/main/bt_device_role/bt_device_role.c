@@ -22,6 +22,16 @@
  * Originally this file had none, which made a real hardware test opaque --
  * there was no way to tell from serial output whether the sequence was
  * progressing normally or stuck. Added after the first real device test.
+ *
+ * REAL BUG FOUND AND FIXED via that logging: every cmd_* function used to
+ * call send_hci_cmd() and THEN set g_state to the "sent" value afterward.
+ * A real hardware test showed bt_vhci_transport_send() delivers the
+ * corresponding Command Complete event back into our own rx callback
+ * synchronously/reentrantly -- before send_hci_cmd() itself returns. That
+ * meant the event handler checked g_state *before* it had been updated,
+ * saw the stale previous value, matched none of the dispatch branches, and
+ * the whole bring-up sequence silently stalled after the very first command.
+ * Fix: every cmd_* function now sets g_state BEFORE sending, not after.
  */
 #include <string.h>
 #include <stdio.h>
@@ -88,8 +98,9 @@ static void send_hci_cmd(uint16_t opcode, const void *params, uint8_t param_len)
 
 static void cmd_reset(void) {
     printf("# bt_device_role: cmd_reset\n");
-    send_hci_cmd(BT_HCI_OP_RESET, NULL, 0);
+    /* State set BEFORE send -- see file header note on why order matters. */
     g_state = BT_DEV_STATE_RESET_SENT;
+    send_hci_cmd(BT_HCI_OP_RESET, NULL, 0);
 }
 
 static void cmd_write_local_name(void) {
@@ -97,8 +108,8 @@ static void cmd_write_local_name(void) {
     struct bt_hci_cp_write_local_name cp;
     memset(&cp, 0, sizeof(cp));
     strncpy((char *)cp.local_name, WM_DEVICE_NAME, sizeof(cp.local_name) - 1);
-    send_hci_cmd(BT_HCI_OP_WRITE_LOCAL_NAME, &cp, sizeof(cp));
     g_state = BT_DEV_STATE_NAME_SET;
+    send_hci_cmd(BT_HCI_OP_WRITE_LOCAL_NAME, &cp, sizeof(cp));
 }
 
 static void cmd_write_class_of_device(void) {
@@ -112,8 +123,8 @@ static void cmd_write_class_of_device(void) {
     cp.dev_class[0] = 0x04;
     cp.dev_class[1] = 0x25;
     cp.dev_class[2] = 0x00;
-    send_hci_cmd(BT_HCI_OP_WRITE_CLASS_OF_DEVICE, &cp, sizeof(cp));
     g_state = BT_DEV_STATE_COD_SET;
+    send_hci_cmd(BT_HCI_OP_WRITE_CLASS_OF_DEVICE, &cp, sizeof(cp));
 }
 
 static void cmd_write_ssp_mode_disable(void) {
@@ -125,8 +136,8 @@ static void cmd_write_ssp_mode_disable(void) {
      * PIN reply logic at all. */
     struct bt_hci_cp_write_ssp_mode cp;
     cp.mode = 0x00;
-    send_hci_cmd(BT_HCI_OP_WRITE_SSP_MODE, &cp, sizeof(cp));
     g_state = BT_DEV_STATE_SSP_DISABLED;
+    send_hci_cmd(BT_HCI_OP_WRITE_SSP_MODE, &cp, sizeof(cp));
 }
 
 static void cmd_write_scan_enable(void) {
@@ -134,8 +145,8 @@ static void cmd_write_scan_enable(void) {
     struct bt_hci_cp_write_scan_enable cp;
     cp.scan_enable = 0x03; /* bit0 = inquiry scan, bit1 = page scan: both on
                              * -> discoverable AND connectable */
-    send_hci_cmd(BT_HCI_OP_WRITE_SCAN_ENABLE, &cp, sizeof(cp));
     g_state = BT_DEV_STATE_SCAN_ENABLED;
+    send_hci_cmd(BT_HCI_OP_WRITE_SCAN_ENABLE, &cp, sizeof(cp));
 }
 
 static void cmd_accept_connection_request(const bt_addr_t *bdaddr) {
@@ -147,8 +158,8 @@ static void cmd_accept_connection_request(const bt_addr_t *bdaddr) {
                       * BlueRetro's host-role code, which hardcodes 0x00
                       * (become master) at the equivalent call site in
                       * ../bt_reference/hci.c. */
-    send_hci_cmd(BT_HCI_OP_ACCEPT_CONN_REQ, &cp, sizeof(cp));
     g_state = BT_DEV_STATE_ACCEPTING_CONN;
+    send_hci_cmd(BT_HCI_OP_ACCEPT_CONN_REQ, &cp, sizeof(cp));
 }
 
 static void cmd_pin_code_reply(const bt_addr_t *bdaddr) {
@@ -168,8 +179,8 @@ static void cmd_pin_code_reply(const bt_addr_t *bdaddr) {
     for (int i = 0; i < 6; i++) {
         cp.pin_code[i] = bdaddr->val[5 - i]; /* reversed byte order, per xwiimote doc */
     }
-    send_hci_cmd(BT_HCI_OP_PIN_CODE_REPLY, &cp, sizeof(cp));
     g_state = BT_DEV_STATE_PIN_EXCHANGE;
+    send_hci_cmd(BT_HCI_OP_PIN_CODE_REPLY, &cp, sizeof(cp));
 }
 
 void bt_device_role_init(void) {
