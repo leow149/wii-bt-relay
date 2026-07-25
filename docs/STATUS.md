@@ -63,6 +63,50 @@ anything (even just printing to Serial) before touching Board B.
 | `uart_bridge.*` (Board B side) | 🟢 Straightforward, compiles clean | Completes the Board A → Board B data path; simple framing/checksum/dedup logic, low risk. |
 | Output report handling (LED/rumble) | 🔴 Not implemented | The Wii will send these once channels are open; not responding may cause it to treat the connection as unresponsive. Next thing to build after hardware validates the L2CAP/SDP layers. |
 
+## Real hardware bring-up log
+
+Board B has now actually been flashed to a real ESP32 and run. Genuine bugs
+found this way (as opposed to everything above, which was reasoning/research
+without hardware in the loop):
+
+1. `main/CMakeLists.txt` was missing `esp_driver_uart` in `PRIV_REQUIRES` --
+   `driver/uart.h` moved into its own component in ESP-IDF v5.x. Fixed.
+2. `bt_vhci_transport.c`'s own `vhci_send()` function name collided with a
+   same-named symbol already inside ESP-IDF's precompiled Bluetooth
+   controller blob (`libbtdm_app.a`) -- real linker error. Renamed to
+   `bt_vhci_transport_send` throughout.
+3. Bluetooth wasn't enabled in Kconfig at all by default -- added
+   `board-b-wii/sdkconfig.defaults` to enable the controller in BR/EDR-only,
+   VHCI, no-host-stack mode (matching how this code actually talks to the
+   radio).
+4. `esp_bt_controller_enable()` was called with `ESP_BT_MODE_BTDM` (dual
+   BLE+Classic), which doesn't match the BR/EDR-only mode `sdkconfig.defaults`
+   configures the controller for -- real `ESP_ERR_INVALID_ARG` on hardware.
+   Fixed to `ESP_BT_MODE_CLASSIC_BT`.
+5. The ESP32's Classic BT controller's own internal radio-handling tasks are
+   CPU-heavy enough (no host stack layered on top) to trip the default Task
+   Watchdog on the idle tasks, even with our own loop yielding normally --
+   confirmed via the watchdog's own backtrace, which showed our task in
+   ordinary spots (`uart_read_bytes`, `vTaskDelay`), not stuck anywhere.
+   Fixed per Espressif's own documented guidance: stopped the watchdog from
+   monitoring the idle tasks specifically, rather than raising the timeout
+   or disabling it system-wide.
+6. **The most interesting one**: every `cmd_*` function in `bt_device_role.c`
+   used to call `send_hci_cmd()` and only update `g_state` *afterward*. Real
+   hardware logging showed `bt_vhci_transport_send()` delivers the
+   corresponding Command Complete event back into our own rx callback
+   synchronously/reentrantly -- before `send_hci_cmd()` itself returns. The
+   event handler was checking `g_state` before it had been updated, matching
+   none of its dispatch branches, and the entire bring-up sequence silently
+   stalled after the very first command (Reset) with no error, just no
+   further output. Fixed: state is now set before sending in every `cmd_*`
+   function. This is exactly the kind of bug that's invisible without a real
+   device and real logging -- nothing about it would show up in a read-through
+   or a stub-header compile check.
+
+Current status as of this log: bring-up gets past Reset and is being
+retested with fix #6 in place. Update this section as testing continues.
+
 ## What to actually do first
 
 1. Flash Board A alone, confirm it reads your real controller correctly over serial.
