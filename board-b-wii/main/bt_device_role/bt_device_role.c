@@ -17,8 +17,14 @@
  * against real hardware with the capture workflow in tools/CAPTURE_NOTES.md.
  * L2CAP channel setup (needed once BT_DEV_STATE_LINK_ESTABLISHED is reached)
  * is also not yet implemented — see docs/ARCHITECTURE.md.
+ *
+ * LOGGING: every cmd_* function and event branch below now prints a line.
+ * Originally this file had none, which made a real hardware test opaque --
+ * there was no way to tell from serial output whether the sequence was
+ * progressing normally or stuck. Added after the first real device test.
  */
 #include <string.h>
+#include <stdio.h>
 
 /* zephyr_hci_defs.h expects this macro to already be defined — in
  * BlueRetro's own tree it lives in adapter/adapter.h, a file we did not
@@ -76,15 +82,18 @@ static void send_hci_cmd(uint16_t opcode, const void *params, uint8_t param_len)
     pkt[2] = (opcode >> 8) & 0xff;
     pkt[3] = param_len;
     if (param_len) memcpy(&pkt[4], params, param_len);
+    printf("# bt_device_role: send_hci_cmd opcode=0x%04x len=%d\n", opcode, param_len);
     bt_vhci_transport_send(pkt, 4 + param_len);
 }
 
 static void cmd_reset(void) {
+    printf("# bt_device_role: cmd_reset\n");
     send_hci_cmd(BT_HCI_OP_RESET, NULL, 0);
     g_state = BT_DEV_STATE_RESET_SENT;
 }
 
 static void cmd_write_local_name(void) {
+    printf("# bt_device_role: cmd_write_local_name -> \"%s\"\n", WM_DEVICE_NAME);
     struct bt_hci_cp_write_local_name cp;
     memset(&cp, 0, sizeof(cp));
     strncpy((char *)cp.local_name, WM_DEVICE_NAME, sizeof(cp.local_name) - 1);
@@ -93,6 +102,7 @@ static void cmd_write_local_name(void) {
 }
 
 static void cmd_write_class_of_device(void) {
+    printf("# bt_device_role: cmd_write_class_of_device -> 0x002504\n");
     struct bt_hci_cp_write_class_of_device cp;
     /* Confirmed against rnconrad/WiimoteEmulator's adapter.c, which is
      * known to pair with real Wii/vWii consoles: wiimote_class = 0x002504.
@@ -107,6 +117,7 @@ static void cmd_write_class_of_device(void) {
 }
 
 static void cmd_write_ssp_mode_disable(void) {
+    printf("# bt_device_role: cmd_write_ssp_mode_disable\n");
     /* The Wii only speaks legacy PIN-based pairing. rnconrad's adapter.c
      * explicitly disables Simple Secure Pairing mode before anything else
      * (set_up_simple_pairing_mode(dd) writing 0) — without this, a modern
@@ -119,6 +130,7 @@ static void cmd_write_ssp_mode_disable(void) {
 }
 
 static void cmd_write_scan_enable(void) {
+    printf("# bt_device_role: cmd_write_scan_enable -> discoverable+connectable\n");
     struct bt_hci_cp_write_scan_enable cp;
     cp.scan_enable = 0x03; /* bit0 = inquiry scan, bit1 = page scan: both on
                              * -> discoverable AND connectable */
@@ -127,6 +139,8 @@ static void cmd_write_scan_enable(void) {
 }
 
 static void cmd_accept_connection_request(const bt_addr_t *bdaddr) {
+    printf("# bt_device_role: cmd_accept_connection_request from %02X:%02X:%02X:%02X:%02X:%02X\n",
+           bdaddr->val[5], bdaddr->val[4], bdaddr->val[3], bdaddr->val[2], bdaddr->val[1], bdaddr->val[0]);
     struct bt_hci_cp_accept_conn_req cp;
     cp.bdaddr = *bdaddr;
     cp.role = 0x01; /* 0x01 = remain SLAVE. This is the key flip versus
@@ -138,6 +152,8 @@ static void cmd_accept_connection_request(const bt_addr_t *bdaddr) {
 }
 
 static void cmd_pin_code_reply(const bt_addr_t *bdaddr) {
+    printf("# bt_device_role: cmd_pin_code_reply using bdaddr %02X:%02X:%02X:%02X:%02X:%02X (reversed) as PIN\n",
+           bdaddr->val[5], bdaddr->val[4], bdaddr->val[3], bdaddr->val[2], bdaddr->val[1], bdaddr->val[0]);
     /* Per the xwiimote PROTOCOL doc, the expected PIN when the Wii's sync
      * button initiated pairing is the WII'S OWN bluetooth address in
      * reversed byte order — NOT the host's address, and not a fixed digit
@@ -157,6 +173,7 @@ static void cmd_pin_code_reply(const bt_addr_t *bdaddr) {
 }
 
 void bt_device_role_init(void) {
+    printf("# bt_device_role: init, starting HCI bring-up sequence\n");
     g_state = BT_DEV_STATE_INIT;
     /* bt_vhci_transport_init() itself calls back into us via
      * bt_device_role_on_hci_event() once packets start arriving; the
@@ -199,17 +216,21 @@ static void bt_device_role_handle_hci_event(uint8_t *data, uint16_t len) {
              * completed. (cc is still parsed via the real struct so this is
              * easy to extend into a per-opcode dispatch later if commands
              * ever get pipelined.) */
-            (void)cc;
+            printf("# bt_device_role: EVT_CMD_COMPLETE (opcode=0x%04x, state was %d)\n", cc->opcode, g_state);
             if (g_state == BT_DEV_STATE_RESET_SENT) cmd_write_local_name();
             else if (g_state == BT_DEV_STATE_NAME_SET) cmd_write_class_of_device();
             else if (g_state == BT_DEV_STATE_COD_SET) cmd_write_scan_enable();
             else if (g_state == BT_DEV_STATE_SCAN_ENABLED) cmd_write_ssp_mode_disable();
-            else if (g_state == BT_DEV_STATE_SSP_DISABLED) g_state = BT_DEV_STATE_WAIT_CONN_REQUEST;
+            else if (g_state == BT_DEV_STATE_SSP_DISABLED) {
+                g_state = BT_DEV_STATE_WAIT_CONN_REQUEST;
+                printf("# bt_device_role: bring-up complete, now discoverable+connectable as \"%s\"\n", WM_DEVICE_NAME);
+            }
             break;
         }
 
         case BT_HCI_EVT_CONN_REQUEST: {
             struct bt_hci_evt_conn_request *cr = (struct bt_hci_evt_conn_request *)pkt->data;
+            printf("# bt_device_role: EVT_CONN_REQUEST\n");
             g_peer_addr = cr->bdaddr;
             cmd_accept_connection_request(&g_peer_addr);
             break;
@@ -217,6 +238,7 @@ static void bt_device_role_handle_hci_event(uint8_t *data, uint16_t len) {
 
         case BT_HCI_EVT_PIN_CODE_REQ: {
             struct bt_hci_evt_pin_code_req *pr = (struct bt_hci_evt_pin_code_req *)pkt->data;
+            printf("# bt_device_role: EVT_PIN_CODE_REQ\n");
             /* Per the xwiimote PROTOCOL doc, use the WII'S bdaddr as the PIN,
              * not necessarily the one echoed in this event — TODO_VERIFY
              * against a live capture whether pr->bdaddr here is in fact the
@@ -228,17 +250,20 @@ static void bt_device_role_handle_hci_event(uint8_t *data, uint16_t len) {
 
         case BT_HCI_EVT_CONN_COMPLETE: {
             struct bt_hci_evt_conn_complete *cc = (struct bt_hci_evt_conn_complete *)pkt->data;
+            printf("# bt_device_role: EVT_CONN_COMPLETE status=0x%02x handle=0x%04x\n", cc->status, cc->handle);
             if (cc->status == 0x00) {
                 g_acl_handle = cc->handle;
                 g_state = BT_DEV_STATE_LINK_ESTABLISHED;
                 bt_l2cap_device_role_init(g_acl_handle);
             } else {
+                printf("# bt_device_role: connection failed, status=0x%02x -> ERROR state\n", cc->status);
                 g_state = BT_DEV_STATE_ERROR;
             }
             break;
         }
 
         default:
+            printf("# bt_device_role: unhandled HCI event 0x%02x\n", pkt->evt_hdr.evt);
             break;
     }
 }
@@ -274,6 +299,7 @@ void bt_device_role_poll(void) {
          * bt_l2cap_device_role only currently reports both-open as a single
          * combined boolean. Revisit if per-channel state ever matters
          * (e.g. for debugging which channel is slow to configure). */
+        printf("# bt_device_role: both L2CAP channels open -> STREAMING\n");
         g_state = BT_DEV_STATE_STREAMING;
     }
 }
