@@ -1,0 +1,37 @@
+# Board B talks directly to the raw VHCI layer (esp_vhci_host_register_callback /
+# esp_vhci_host_send_packet in bt_vhci_transport.c) and never uses Bluedroid or
+# NimBLE -- same pattern BlueRetro's vendored host.c uses. None of that is the
+# default in a fresh ESP-IDF project, so it has to be turned on explicitly here
+# rather than relying on `idf.py menuconfig` being run by hand every time.
+#
+# Equivalent menuconfig path, if you want to see/edit this interactively instead:
+#   Component config -> Bluetooth
+#     Bluetooth: enabled
+#     Host: disabled
+#     Controller: enabled, mode = BR/EDR Only
+#     BR/EDR Sync: HCI
+#     HCI mode: VHCI
+#
+# NOTE: if you already ran `idf.py build` before this file existed, delete the
+# generated board-b-wii/sdkconfig file (not sdkconfig.defaults) once so it gets
+# regenerated from these defaults -- `idf.py set-target esp32` alone does not
+# reliably re-merge new defaults into an sdkconfig that already exists.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_ONLY=y
+CONFIG_BT_CONTROLLER_ENABLED=y
+
+CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=y
+CONFIG_BTDM_CTRL_BR_EDR_MAX_ACL_CONN=2
+CONFIG_BTDM_CTRL_BR_EDR_MAX_SYNC_CONN=0
+CONFIG_BTDM_CTRL_BR_EDR_SCO_DATA_PATH_HCI=y
+CONFIG_BTDM_CTRL_BR_EDR_SCO_DATA_PATH_EFF=0
+CONFIG_BTDM_CTRL_PCM_ROLE_EFF=0
+CONFIG_BTDM_CTRL_PCM_POLAR_EFF=0
+CONFIG_BTDM_CTRL_LEGACY_AUTH_VENDOR_EVT=y
+CONFIG_BTDM_CTRL_LEGACY_AUTH_VENDOR_EVT_EFF=y
+CONFIG_BTDM_CTRL_BLE_MAX_CONN_EFF=0
+CONFIG_BTDM_CTRL_BR_EDR_MAX_ACL_CONN_EFF=2
+CONFIG_BTDM_CTRL_BR_EDR_MAX_SYNC_CONN_EFF=0
+CONFIG_BTDM_CTRL_PINNED_TO_CORE_0=y
+CONFIG_BTDM_CTRL_PINNED_TO_CORE=0
+CONFIG_BTDM_CTRL_HCI_MODE_VHCI=y
