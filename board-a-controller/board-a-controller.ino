@@ -57,9 +57,19 @@ static uint16_t map_buttons(ControllerPtr ctl) {
     if (ctl->b())     out |= WII_BTN_B;
     if (ctl->x())     out |= WII_BTN_ONE;
     if (ctl->y())     out |= WII_BTN_TWO;
-    if (ctl->miscButtonSelect()) out |= WII_BTN_MINUS;
-    if (ctl->miscButtonStart())  out |= WII_BTN_PLUS;
-    if (ctl->miscButtonSystem()) out |= WII_BTN_HOME;
+    /* This Bluepad32 version (4.1.0, per the compile error that caught this)
+     * doesn't have miscButtonSelect/Start/System() -- those were a guess at
+     * an older/different API shape. The real per-button methods, confirmed
+     * against Bluepad32's own keywords.txt, are miscBack()/miscSystem()/
+     * miscHome(). The mapping below (back=minus, system=plus, home=home) is
+     * a best-effort guess at which physical button each name corresponds to
+     * across different controller brands (Xbox/PS/Switch all name their
+     * "select" and "start" equivalents differently) -- verify against your
+     * actual controller by watching Serial output once you can test, and
+     * swap the mapping below if a button triggers the wrong action. */
+    if (ctl->miscBack())   out |= WII_BTN_MINUS;
+    if (ctl->miscSystem()) out |= WII_BTN_PLUS;
+    if (ctl->miscHome())   out |= WII_BTN_HOME;
 
     uint8_t dpad = ctl->dpad();
     if (dpad & DPAD_UP)    out |= WII_BTN_UP;
