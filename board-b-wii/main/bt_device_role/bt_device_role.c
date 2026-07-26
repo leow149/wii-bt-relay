@@ -33,25 +33,36 @@
  * the whole bring-up sequence silently stalled after the very first command.
  * Fix: every cmd_* function now sets g_state BEFORE sending, not after.
  *
- * SECOND REAL BUG FOUND ON HARDWARE: with the above fixed, bring-up
- * completed all the way to "discoverable+connectable", and a generic
- * Bluetooth scan (another ESP32 running Bluepad32/BTstack) found and
- * connected to it fine -- but pressing the Wii's own SYNC button found
- * nothing at all. Root cause: per the Bluetooth Core Spec's Generic Access
- * Profile, "a device in general discoverable mode shall not respond to a
- * LIAC inquiry" -- and a button-triggered "temporarily discoverable for
- * pairing" scan (exactly what the Wii's sync button is) is the canonical
- * use case for a Limited Inquiry (LIAC), not a General one. Our Class of
- * Device (0x002504, borrowed from a real Wii-confirmed reference project)
- * already had bit 13 -- the standard "Limited Discoverable Mode" bit --
- * set, without that necessarily being understood at the time. What was
- * missing is HCI_Write_Current_IAC_LAP, which tells the controller itself
- * to recognize and respond to LIAC (not just GIAC) during inquiry scan.
- * This opcode isn't in the vendored zephyr_hci_defs.h -- BlueRetro, being a
- * host-role stack that only makes outbound connections, never needed to
- * control its own discoverability, so it never needed this command. Added
- * here directly against the real Bluetooth Core Spec Controller & Baseband
- * command group (OGF 0x03, OCF 0x3A).
+ * SECOND THING FOUND ON HARDWARE, PARTIALLY WRONG: with the above fixed,
+ * bring-up completed all the way to "discoverable+connectable", and a
+ * generic Bluetooth scan (another ESP32 running Bluepad32/BTstack) found
+ * and connected to it fine -- but pressing the Wii's own SYNC button found
+ * nothing at all. At the time, this looked like a Limited Discoverable
+ * Mode / LIAC-vs-GIAC issue (a device in only general discoverable mode
+ * won't answer a Limited Inquiry, per the Bluetooth GAP spec, and a
+ * button-triggered pairing scan is the canonical LIAC use case) so
+ * HCI_Write_Current_IAC_LAP was added below to register both. That part is
+ * harmless and stays, but a REAL CAPTURE of an actual Wiimote (see finding
+ * #3) shows the real Wiimote does NOT set the Limited Discoverable Mode
+ * bit at all -- so this was very likely the wrong theory. Leaving the IAC
+ * LAP command in place since responding to both GIAC and LIAC can't hurt,
+ * but the "still nothing" report that followed this fix turned out to
+ * have a different, better-evidenced cause: see finding #3.
+ *
+ * THIRD FINDING, FROM AN ACTUAL PACKET CAPTURE (not reasoning): the user
+ * captured a real Wiimote's own over-the-air Class of Device using btmon
+ * while pairing it to a PC. The real value is 0x000508 -- Major Device
+ * Class Peripheral(HID) (same as ours), but Minor Device Class "Gamepad"
+ * (bit pattern 0010), not "Joystick" (bit pattern 0001) like our old
+ * 0x002504, and critically, NO Limited Discoverable Mode bit set at all
+ * (confirming finding #2 above was chasing the wrong mechanism). The same
+ * capture also caught Board B itself being correctly inquired by the PC,
+ * reporting exactly the 0x002504 we'd set -- confirming our bring-up
+ * sequence broadcasts precisely what we tell it to; the bug was in what we
+ * were telling it, not whether it worked. Fixed cmd_write_class_of_device()
+ * below to use the real, captured 0x000508 instead of the previous value
+ * (which came from a working reference project, but apparently didn't
+ * match a genuine retail Wiimote's minor device class closely enough).
  */
 #include <string.h>
 #include <stdio.h>
@@ -78,8 +89,10 @@
  * GIAC (General Inquiry Access Code) = 0x9E8B33.
  * LIAC (Limited Inquiry Access Code) = 0x9E8B00.
  * Both registered together so we keep responding to ordinary/general scans
- * (like Board A's own Bluepad32/BTstack, or a phone) as well as the Wii's
- * apparent Limited Inquiry. */
+ * (like Board A's own Bluepad32/BTstack, or a phone) as well as any Limited
+ * Inquiry a host might use -- see the file header's finding #2/#3 for why
+ * this turned out not to be the actual mechanism a real Wiimote relies on,
+ * but it's kept since it's harmless. */
 #define BT_HCI_OP_WRITE_CURRENT_IAC_LAP BT_OP(BT_OGF_BASEBAND, 0x003a)
 struct bt_hci_cp_write_current_iac_lap {
     uint8_t num_current_iac;
@@ -149,20 +162,21 @@ static void cmd_write_local_name(void) {
 }
 
 static void cmd_write_class_of_device(void) {
-    printf("# bt_device_role: cmd_write_class_of_device -> 0x002504\n");
+    printf("# bt_device_role: cmd_write_class_of_device -> 0x000508\n");
     struct bt_hci_cp_write_class_of_device cp;
-    /* Confirmed against rnconrad/WiimoteEmulator's adapter.c, which is
-     * known to pair with real Wii/vWii consoles: wiimote_class = 0x002504.
-     * Wire bytes are little-endian per the 24-bit CoD field, so byte0
-     * (LSB) = 0x04, byte1 = 0x25, byte2 (MSB) = 0x00. Previously this was
-     * an unverified placeholder (0x04, 0x05, 0x00) — now corrected.
-     * NOTE: bit 13 of this value (0x2000) is the standard "Limited
-     * Discoverable Mode" bit and is already set here (0x2504 = 0x2000 |
-     * 0x0504) -- confirmed by decoding it, not by design at the time this
-     * value was first added. See cmd_write_current_iac_lap() for the other
-     * half of what Limited Discoverable Mode actually requires. */
-    cp.dev_class[0] = 0x04;
-    cp.dev_class[1] = 0x25;
+    /* REAL, CAPTURED value -- see file header finding #3. A real Wiimote
+     * was actually sniffed over the air via btmon during a PC pairing
+     * session, and its true Class of Device is 0x000508: Major Device
+     * Class Peripheral(HID) (0x05, same as before), Minor Device Class
+     * Gamepad (bit pattern 0010), and no Limited Discoverable Mode bit.
+     * This REPLACES the previous 0x002504 value (Minor Device Class
+     * Joystick, bit pattern 0001, with the Limited Discoverable bit set),
+     * which came from a working reference project but apparently didn't
+     * match a genuine retail Wiimote's advertised minor device class.
+     * Wire bytes are little-endian per the 24-bit CoD field: byte0 (LSB)
+     * = 0x08, byte1 = 0x05, byte2 (MSB) = 0x00. */
+    cp.dev_class[0] = 0x08;
+    cp.dev_class[1] = 0x05;
     cp.dev_class[2] = 0x00;
     g_state = BT_DEV_STATE_COD_SET;
     send_hci_cmd(BT_HCI_OP_WRITE_CLASS_OF_DEVICE, &cp, sizeof(cp));
@@ -178,12 +192,11 @@ static void cmd_write_scan_enable(void) {
 }
 
 static void cmd_write_current_iac_lap(void) {
-    printf("# bt_device_role: cmd_write_current_iac_lap -> GIAC+LIAC (Limited Discoverable Mode)\n");
-    /* See the file header note above for the full story: real hardware
-     * showed the Wii's own sync button finds nothing without this, even
-     * though a generic scan (another ESP32 running Bluepad32/BTstack)
-     * found us fine. Registers BOTH GIAC and LIAC with the controller so
-     * we keep responding to both kinds of inquiry. */
+    printf("# bt_device_role: cmd_write_current_iac_lap -> GIAC+LIAC\n");
+    /* See the file header note above (findings #2/#3): a real Wiimote does
+     * NOT rely on Limited Discoverable Mode, so this almost certainly
+     * wasn't the fix the Wii's sync button needed -- kept anyway since
+     * responding to both GIAC and LIAC is harmless. */
     struct bt_hci_cp_write_current_iac_lap cp;
     cp.num_current_iac = 2;
     cp.iac_lap[0][0] = 0x33; cp.iac_lap[0][1] = 0x8B; cp.iac_lap[0][2] = 0x9E; /* GIAC 0x9E8B33 */
@@ -291,7 +304,7 @@ static void bt_device_role_handle_hci_event(uint8_t *data, uint16_t len) {
             else if (g_state == BT_DEV_STATE_IAC_LAP_SET) cmd_write_ssp_mode_disable();
             else if (g_state == BT_DEV_STATE_SSP_DISABLED) {
                 g_state = BT_DEV_STATE_WAIT_CONN_REQUEST;
-                printf("# bt_device_role: bring-up complete, now discoverable+connectable (GIAC+LIAC) as \"%s\"\n", WM_DEVICE_NAME);
+                printf("# bt_device_role: bring-up complete, now discoverable+connectable as \"%s\"\n", WM_DEVICE_NAME);
             }
             break;
         }
