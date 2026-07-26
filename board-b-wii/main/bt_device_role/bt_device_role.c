@@ -32,6 +32,26 @@
  * saw the stale previous value, matched none of the dispatch branches, and
  * the whole bring-up sequence silently stalled after the very first command.
  * Fix: every cmd_* function now sets g_state BEFORE sending, not after.
+ *
+ * SECOND REAL BUG FOUND ON HARDWARE: with the above fixed, bring-up
+ * completed all the way to "discoverable+connectable", and a generic
+ * Bluetooth scan (another ESP32 running Bluepad32/BTstack) found and
+ * connected to it fine -- but pressing the Wii's own SYNC button found
+ * nothing at all. Root cause: per the Bluetooth Core Spec's Generic Access
+ * Profile, "a device in general discoverable mode shall not respond to a
+ * LIAC inquiry" -- and a button-triggered "temporarily discoverable for
+ * pairing" scan (exactly what the Wii's sync button is) is the canonical
+ * use case for a Limited Inquiry (LIAC), not a General one. Our Class of
+ * Device (0x002504, borrowed from a real Wii-confirmed reference project)
+ * already had bit 13 -- the standard "Limited Discoverable Mode" bit --
+ * set, without that necessarily being understood at the time. What was
+ * missing is HCI_Write_Current_IAC_LAP, which tells the controller itself
+ * to recognize and respond to LIAC (not just GIAC) during inquiry scan.
+ * This opcode isn't in the vendored zephyr_hci_defs.h -- BlueRetro, being a
+ * host-role stack that only makes outbound connections, never needed to
+ * control its own discoverability, so it never needed this command. Added
+ * here directly against the real Bluetooth Core Spec Controller & Baseband
+ * command group (OGF 0x03, OCF 0x3A).
  */
 #include <string.h>
 #include <stdio.h>
@@ -49,6 +69,22 @@
 #include "bt_vhci_transport.h"
 #include "bt_l2cap_device_role.h"
 #include "wm_reports.h"
+
+/* Not present in the vendored zephyr_hci_defs.h -- see the file header note
+ * above for why. Real HCI opcode/parameter layout per the Bluetooth Core
+ * Spec's Controller & Baseband command group, not guessed:
+ *   OGF = 0x03 (Baseband), OCF = 0x3A -> opcode 0x0C3A
+ *   Params: Num_Current_IAC (1 octet), then that many 3-octet LAP values.
+ * GIAC (General Inquiry Access Code) = 0x9E8B33.
+ * LIAC (Limited Inquiry Access Code) = 0x9E8B00.
+ * Both registered together so we keep responding to ordinary/general scans
+ * (like Board A's own Bluepad32/BTstack, or a phone) as well as the Wii's
+ * apparent Limited Inquiry. */
+#define BT_HCI_OP_WRITE_CURRENT_IAC_LAP BT_OP(BT_OGF_BASEBAND, 0x003a)
+struct bt_hci_cp_write_current_iac_lap {
+    uint8_t num_current_iac;
+    uint8_t iac_lap[2][3]; /* [0] = GIAC, [1] = LIAC -- see cmd_write_current_iac_lap() */
+} __packed;
 
 /* Minimal packet view for received ACL data packets: h4 type + acl header +
  * l2cap header + payload. Same rationale as bt_hci_evt_pkt_view below —
@@ -119,12 +155,41 @@ static void cmd_write_class_of_device(void) {
      * known to pair with real Wii/vWii consoles: wiimote_class = 0x002504.
      * Wire bytes are little-endian per the 24-bit CoD field, so byte0
      * (LSB) = 0x04, byte1 = 0x25, byte2 (MSB) = 0x00. Previously this was
-     * an unverified placeholder (0x04, 0x05, 0x00) — now corrected. */
+     * an unverified placeholder (0x04, 0x05, 0x00) — now corrected.
+     * NOTE: bit 13 of this value (0x2000) is the standard "Limited
+     * Discoverable Mode" bit and is already set here (0x2504 = 0x2000 |
+     * 0x0504) -- confirmed by decoding it, not by design at the time this
+     * value was first added. See cmd_write_current_iac_lap() for the other
+     * half of what Limited Discoverable Mode actually requires. */
     cp.dev_class[0] = 0x04;
     cp.dev_class[1] = 0x25;
     cp.dev_class[2] = 0x00;
     g_state = BT_DEV_STATE_COD_SET;
     send_hci_cmd(BT_HCI_OP_WRITE_CLASS_OF_DEVICE, &cp, sizeof(cp));
+}
+
+static void cmd_write_scan_enable(void) {
+    printf("# bt_device_role: cmd_write_scan_enable -> discoverable+connectable\n");
+    struct bt_hci_cp_write_scan_enable cp;
+    cp.scan_enable = 0x03; /* bit0 = inquiry scan, bit1 = page scan: both on
+                             * -> discoverable AND connectable */
+    g_state = BT_DEV_STATE_SCAN_ENABLED;
+    send_hci_cmd(BT_HCI_OP_WRITE_SCAN_ENABLE, &cp, sizeof(cp));
+}
+
+static void cmd_write_current_iac_lap(void) {
+    printf("# bt_device_role: cmd_write_current_iac_lap -> GIAC+LIAC (Limited Discoverable Mode)\n");
+    /* See the file header note above for the full story: real hardware
+     * showed the Wii's own sync button finds nothing without this, even
+     * though a generic scan (another ESP32 running Bluepad32/BTstack)
+     * found us fine. Registers BOTH GIAC and LIAC with the controller so
+     * we keep responding to both kinds of inquiry. */
+    struct bt_hci_cp_write_current_iac_lap cp;
+    cp.num_current_iac = 2;
+    cp.iac_lap[0][0] = 0x33; cp.iac_lap[0][1] = 0x8B; cp.iac_lap[0][2] = 0x9E; /* GIAC 0x9E8B33 */
+    cp.iac_lap[1][0] = 0x00; cp.iac_lap[1][1] = 0x8B; cp.iac_lap[1][2] = 0x9E; /* LIAC 0x9E8B00 */
+    g_state = BT_DEV_STATE_IAC_LAP_SET;
+    send_hci_cmd(BT_HCI_OP_WRITE_CURRENT_IAC_LAP, &cp, sizeof(cp));
 }
 
 static void cmd_write_ssp_mode_disable(void) {
@@ -138,15 +203,6 @@ static void cmd_write_ssp_mode_disable(void) {
     cp.mode = 0x00;
     g_state = BT_DEV_STATE_SSP_DISABLED;
     send_hci_cmd(BT_HCI_OP_WRITE_SSP_MODE, &cp, sizeof(cp));
-}
-
-static void cmd_write_scan_enable(void) {
-    printf("# bt_device_role: cmd_write_scan_enable -> discoverable+connectable\n");
-    struct bt_hci_cp_write_scan_enable cp;
-    cp.scan_enable = 0x03; /* bit0 = inquiry scan, bit1 = page scan: both on
-                             * -> discoverable AND connectable */
-    g_state = BT_DEV_STATE_SCAN_ENABLED;
-    send_hci_cmd(BT_HCI_OP_WRITE_SCAN_ENABLE, &cp, sizeof(cp));
 }
 
 static void cmd_accept_connection_request(const bt_addr_t *bdaddr) {
@@ -190,10 +246,10 @@ void bt_device_role_init(void) {
      * bt_device_role_on_hci_event() once packets start arriving; the
      * Reset command below is sent only after the transport is up. */
     cmd_reset();
-    /* Remaining bring-up (name/CoD/scan enable) is driven from the Command
-     * Complete event for Reset in bt_device_role_on_hci_event() below, since
-     * each HCI command must wait for its predecessor's completion event
-     * before the controller will accept the next one. */
+    /* Remaining bring-up (name/CoD/scan enable/IAC LAP/SSP) is driven from
+     * the Command Complete event for Reset in bt_device_role_on_hci_event()
+     * below, since each HCI command must wait for its predecessor's
+     * completion event before the controller will accept the next one. */
 }
 
 /* Registered with bt_vhci_transport_init() as the rx callback (see main.c).
@@ -231,10 +287,11 @@ static void bt_device_role_handle_hci_event(uint8_t *data, uint16_t len) {
             if (g_state == BT_DEV_STATE_RESET_SENT) cmd_write_local_name();
             else if (g_state == BT_DEV_STATE_NAME_SET) cmd_write_class_of_device();
             else if (g_state == BT_DEV_STATE_COD_SET) cmd_write_scan_enable();
-            else if (g_state == BT_DEV_STATE_SCAN_ENABLED) cmd_write_ssp_mode_disable();
+            else if (g_state == BT_DEV_STATE_SCAN_ENABLED) cmd_write_current_iac_lap();
+            else if (g_state == BT_DEV_STATE_IAC_LAP_SET) cmd_write_ssp_mode_disable();
             else if (g_state == BT_DEV_STATE_SSP_DISABLED) {
                 g_state = BT_DEV_STATE_WAIT_CONN_REQUEST;
-                printf("# bt_device_role: bring-up complete, now discoverable+connectable as \"%s\"\n", WM_DEVICE_NAME);
+                printf("# bt_device_role: bring-up complete, now discoverable+connectable (GIAC+LIAC) as \"%s\"\n", WM_DEVICE_NAME);
             }
             break;
         }
