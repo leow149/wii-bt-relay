@@ -36,6 +36,10 @@ typedef enum {
     BT_DEV_STATE_NAME_SET,          /* HCI_Write_Local_Name done */
     BT_DEV_STATE_COD_SET,           /* HCI_Write_Class_of_Device done */
     BT_DEV_STATE_SCAN_ENABLED,      /* HCI_Write_Scan_Enable: page+inquiry scan on */
+    BT_DEV_STATE_IAC_LAP_SET,       /* HCI_Write_Current_IAC_LAP: GIAC+LIAC registered --
+                                     * needed so a Limited Inquiry (e.g. the Wii's own
+                                     * sync-button scan) finds us at all, not just a
+                                     * General Inquiry. See bt_device_role.c. */
     BT_DEV_STATE_SSP_DISABLED,      /* HCI_Write_Simple_Pairing_Mode(0): legacy PIN pairing only */
     BT_DEV_STATE_WAIT_CONN_REQUEST, /* Discoverable, waiting for the Wii to page us */
     BT_DEV_STATE_ACCEPTING_CONN,    /* HCI_Accept_Connection_Request sent, role=slave */
