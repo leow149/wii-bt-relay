@@ -55,11 +55,11 @@ anything (even just printing to Serial) before touching Board B.
 | `wiimote/wm_reports.{c,h}` | 🟡 Written from public spec, unverified | Report ID layout follows the WiiBrew wiki's documented format. Byte-for-byte correctness has **not** been checked against a real capture. |
 | `wiimote/wm_crypto.{c,h}` | 🔴 Stub / placeholder | The Wiimote extension "encryption" scheme is real and documented in outline, but I have not verified exact constants against a live packet capture, so the transform in this file is marked `TODO_VERIFY` and should not be trusted until you check it against your own Phase 1 capture. |
 | `wiimote/wm_eeprom.{c,h}` | 🔴 Placeholder data | Calibration/Mii-region layout offsets are from public docs; actual byte values are zeroed placeholders. Games that read calibration data may behave oddly until you drop in real dumped values. |
-| `bt_device_role/*` | 🟡 Upgraded again — several concrete bugs fixed | Cross-referencing rnconrad/WiimoteEmulator's real, Wii-confirmed source (not copied, see NOTICE) surfaced three likely blockers that are now fixed: (1) Bluetooth address now forced to carry a Nintendo OUI via `bt_bdaddr_setup.c`, (2) Class of Device corrected from an unverified placeholder to the real `0x002504`, (3) Simple Secure Pairing is now explicitly disabled (`cmd_write_ssp_mode_disable`), since the Wii only speaks legacy PIN pairing. The PIN-reply logic was independently confirmed correct against the same source. **Still unverified**: whether these fixes are sufficient — that's only answerable with real hardware. |
+| `bt_device_role/*` | 🟡 Upgraded again — several concrete bugs fixed | Cross-referencing rnconrad/WiimoteEmulator's real, Wii-confirmed source (not copied, see NOTICE) surfaced three likely blockers that are now fixed: (1) Bluetooth address now forced to carry a Nintendo OUI via `bt_bdaddr_setup.c`, (2) Class of Device now the real, **captured** `0x000508` (see Real hardware bring-up log #9 — superseded an earlier "confirmed" value that turned out not to match), (3) Simple Secure Pairing is now explicitly disabled (`cmd_write_ssp_mode_disable`), since the Wii only speaks legacy PIN pairing. The PIN-reply logic was independently confirmed correct against the same source. **Still unverified**: whether these fixes are sufficient — that's only answerable with real hardware. |
 | `bt_device_role/bt_bdaddr_setup.*` | 🟡 Real API, one unverified assumption | Uses the real, documented `esp_base_mac_addr_set()` / Bluetooth-address-is-base-plus-2 relationship (confirmed via Espressif's own docs, not assumed). Not yet verified: exact byte-overflow behavior if the base MAC's last octet is near 0xFF (noted inline as TODO_VERIFY, avoided in the current fixed values by construction, but not handled generally). |
 | `bt_device_role/bt_sdp_device_role.*` | 🟡 New — encoding verified by hand-decoding, content coverage unverified | Implements a from-scratch SDP responder (not copied from any source — see NOTICE) for the single ServiceSearchAttributeRequest a host typically sends to browse the Wiimote's HID service. The DataElement/PDU wire encoding was checked by manually decoding a test response byte-for-byte against the SDP spec — every length field and nested structure lined up correctly. **Not yet verified**: whether the specific set of attributes included (missing HIDDescriptorList, in particular) is enough for the Wii's SDP client to accept the service. Also missing: continuation-state handling for responses that would exceed one L2CAP payload (current response is ~83 bytes, comfortably under typical MTUs, but this hasn't been stress-tested with a larger attribute set). |
 | `bt_device_role/bt_l2cap_device_role.*` | 🟡 Extended to a third (SDP) channel | Same acceptor logic as before, now also handling PSM 0x0001 (SDP) alongside control/interrupt, with a generic channel-data dispatcher routing SDP channel traffic to the new responder. Same `TODO_VERIFY` caveats on proactive Configuration Request timing apply to the SDP channel as well. |
-| `bt_device_role/bt_vhci_transport.*` | 🟢 Pattern verified, transport itself untestable here | Init sequence, callback registration, and packet framing are copied from BlueRetro's real `host.c`, not reconstructed from memory. Compiles cleanly against stub ESP-IDF headers matching the real API shapes. Cannot be run/tested without an actual ESP32. |
+| `bt_device_role/bt_vhci_transport.*` | 🟢 Real hardware validated (queue-based redesign) | Init sequence and callback registration copied from BlueRetro's real `host.c`. The original synchronous busy-wait send design deadlocked on real hardware (see Real hardware bring-up log #8) and was redesigned into an enqueue + separate pump-from-main-loop pattern, closer to BlueRetro's actual TX queue architecture. |
 | `uart_bridge.*` (Board B side) | 🟢 Straightforward, compiles clean | Completes the Board A → Board B data path; simple framing/checksum/dedup logic, low risk. |
 | Output report handling (LED/rumble) | 🔴 Not implemented | The Wii will send these once channels are open; not responding may cause it to treat the connection as unresponsive. Next thing to build after hardware validates the L2CAP/SDP layers. |
 
@@ -103,9 +103,40 @@ without hardware in the loop):
    function. This is exactly the kind of bug that's invisible without a real
    device and real logging -- nothing about it would show up in a read-through
    or a stub-header compile check.
+7. With #6 fixed, bring-up completed fully and another ESP32 running
+   Bluepad32/BTstack found and connected to Board B without issue -- but the
+   Wii's own SYNC button found nothing. First guess: Limited Discoverable
+   Mode / LIAC vs GIAC inquiry (a device only in general discoverable mode
+   won't answer a Limited Inquiry per the Bluetooth GAP spec, and a
+   button-triggered pairing scan is the canonical LIAC use case). Added
+   `HCI_Write_Current_IAC_LAP` to register both. Harmless, but per finding
+   #9 below, very likely not the actual mechanism a real Wiimote relies on.
+8. The busy-wait "wait for controller ready, then send" design in
+   `bt_vhci_transport_send()` turned out to deadlock for real: sending the
+   *next* command from inside the rx callback that delivered the *previous*
+   command's completion can't work, because the controller's "ready for
+   next send" notification doesn't arrive until that callback chain
+   unwinds. Fixed by splitting into an enqueue-only `bt_vhci_transport_send()`
+   (safe from any context) and a separate `bt_vhci_transport_pump_tx()`
+   that does the actual send, called from `main.c`'s ordinary loop.
+9. **A real packet capture** (btmon, a genuine Wiimote pairing to a PC) gave
+   ground truth that superseded a "confirmed" assumption: the real Wiimote's
+   actual Class of Device is `0x000508` (Minor Device Class **Gamepad**, no
+   Limited Discoverable Mode bit), not the `0x002504` (Minor Device Class
+   **Joystick**, Limited Discoverable Mode bit set) this project had been
+   using -- which came from a working reference project, but apparently
+   didn't match a genuine retail Wiimote's advertised identity closely
+   enough. Fixed `cmd_write_class_of_device()` to the real, captured value.
+   The same capture also caught Board B itself being correctly inquired by
+   the PC, reporting exactly the old `0x002504` -- confirming the bring-up
+   sequence broadcasts precisely what it's told to; the bug was in what it
+   was being told, not whether it worked. This also retroactively casts
+   doubt on finding #7's LIAC theory, since the real Wiimote doesn't bother
+   with Limited Discoverable Mode at all.
 
-Current status as of this log: bring-up gets past Reset and is being
-retested with fix #6 in place. Update this section as testing continues.
+Current status as of this log: Class of Device just corrected to the real,
+captured value; retesting against the real Wii is the next step. Update this
+section as testing continues.
 
 ## What to actually do first
 
